@@ -30,7 +30,7 @@ konfetti = "2.2.0"
 transcoder = "ba8f098c94"
 sunrise-sunset-calculator = "1.2"
 subsampling-scale-image-view = "3.10.0"
-pytgcalls-ntgcalls = "4.0.0-alpha03"
+pytgcalls-ntgcalls = "4.0.0-beta02"
 
 #noinspection NewerVersionAvailable
 mp4parser-isoparser = "1.0.6" # Do not upgrade.
