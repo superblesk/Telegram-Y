@@ -1870,6 +1870,8 @@
   <string name="VoipScreenSharing">Screen sharing</string>
   <string name="VoipSharingYourScreen">Sharing your screen</string>
   <string name="VoipSelectCamera">Which camera should be used?</string>
+  <string name="VoipAskCameraBeforeCall">Ask which camera to use</string>
+  <string name="VoipDefaultCamera">Default camera</string>
   <string name="VoipFrontCamera">Front camera</string>
   <string name="VoipBackCamera">Back camera</string>
   <string name="VoipSendMessage">Send message</string>

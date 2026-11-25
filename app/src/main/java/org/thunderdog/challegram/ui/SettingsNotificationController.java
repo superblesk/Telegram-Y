@@ -1158,6 +1158,14 @@ public class SettingsNotificationController extends RecyclerViewController<Setti
           );
           return;
         }
+        if (itemId == R.id.btn_ntgCallsAskCamera) {
+          view.getToggler().setRadioEnabled(Settings.instance().ntgCallsAskCamera(), isUpdate);
+          return;
+        }
+        if (itemId == R.id.btn_ntgCallsDefaultCamera) {
+          view.setData(Settings.instance().ntgCallsDefaultCameraFront() ? R.string.VoipFrontCamera : R.string.VoipBackCamera);
+          return;
+        }
         if (itemId == R.id.btn_notifications_preview) {
           view.getToggler().setRadioEnabled(tdlib.notifications().defaultShowPreview(getScope(item)), isUpdate);
         } else if (itemId == R.id.btn_notifications_contentPreview) {
@@ -1835,6 +1843,26 @@ public class SettingsNotificationController extends RecyclerViewController<Setti
     items.add(new ListItem(ListItem.TYPE_SHADOW_BOTTOM));
     items.add(new ListItem(ListItem.TYPE_DESCRIPTION, 0, 0, R.string.CallRingtoneUserHint));
 
+    if (BuildConfig.USE_NTGCALLS) {
+      items.add(new ListItem(ListItem.TYPE_SHADOW_TOP));
+      items.add(new ListItem(
+        ListItem.TYPE_RADIO_SETTING,
+        R.id.btn_ntgCallsAskCamera,
+        0,
+        R.string.VoipAskCameraBeforeCall
+      ));
+      if (!Settings.instance().ntgCallsAskCamera()) {
+        items.add(new ListItem(ListItem.TYPE_SEPARATOR_FULL));
+        items.add(new ListItem(
+          ListItem.TYPE_VALUED_SETTING,
+          R.id.btn_ntgCallsDefaultCamera,
+          0,
+          R.string.VoipDefaultCamera
+        ));
+      }
+      items.add(new ListItem(ListItem.TYPE_SHADOW_BOTTOM));
+    }
+
     items.add(new ListItem(ListItem.TYPE_SHADOW_TOP));
     items.add(new ListItem(
       ListItem.TYPE_VALUED_SETTING_COMPACT,
@@ -1878,6 +1906,24 @@ public class SettingsNotificationController extends RecyclerViewController<Setti
       0,
       Device.IS_SAMSUNG ? R.string.FullScreenAlerts : R.string.FullScreenNotifications
     ));
+  }
+
+  private void updateNtgCallCameraRows (boolean askCamera) {
+    int toggleIndex = adapter.indexOfViewById(R.id.btn_ntgCallsAskCamera);
+    if (toggleIndex < 0) {
+      return;
+    }
+    int defaultIndex = adapter.indexOfViewById(R.id.btn_ntgCallsDefaultCamera);
+    if (!askCamera && defaultIndex < 0) {
+      List<ListItem> items = new ArrayList<>();
+      items.add(new ListItem(ListItem.TYPE_SEPARATOR_FULL));
+      items.add(new ListItem(ListItem.TYPE_VALUED_SETTING, R.id.btn_ntgCallsDefaultCamera, 0, R.string.VoipDefaultCamera));
+      adapter.getItems().addAll(toggleIndex + 1, items);
+      adapter.notifyItemRangeInserted(toggleIndex + 1, items.size());
+    } else if (askCamera && defaultIndex >= 0) {
+      adapter.removeRange(defaultIndex - 1, 2);
+    }
+    adapter.updateValuedSettingById(R.id.btn_ntgCallsAskCamera);
   }
 
   private void updateFullScreenAlerts () {
@@ -2193,6 +2239,21 @@ public class SettingsNotificationController extends RecyclerViewController<Setti
       CallProblems.openSettings(context, CallProblems.Type.FULL_SCREEN_INTENT_DENIED);
     } else if (viewId == R.id.btn_passcode) {
       tdlib.ui().openPasscodeSetup(this);
+    } else if (viewId == R.id.btn_ntgCallsAskCamera) {
+      boolean askCamera = adapter.toggleView(v);
+      Settings.instance().setNtgCallsAskCamera(askCamera);
+      updateNtgCallCameraRows(askCamera);
+    } else if (viewId == R.id.btn_ntgCallsDefaultCamera) {
+      showOptions(null,
+        new int[] {R.id.btn_camera_front, R.id.btn_camera_rear},
+        new String[] {Lang.getString(R.string.VoipFrontCamera), Lang.getString(R.string.VoipBackCamera)},
+        null,
+        new int[] {R.drawable.baseline_camera_front_24, R.drawable.baseline_camera_rear_24},
+        (itemView, id) -> {
+          Settings.instance().setNtgCallsDefaultCameraFront(id == R.id.btn_camera_front);
+          adapter.updateValuedSettingById(R.id.btn_ntgCallsDefaultCamera);
+          return true;
+        });
     } else if (viewId == R.id.btn_passcodeCalls) {
       if (!Passcode.instance().isEnabled()) {
         context.tooltipManager().builder(v).icon(R.drawable.baseline_lock_24)
@@ -2911,6 +2972,8 @@ public class SettingsNotificationController extends RecyclerViewController<Setti
     if (specificSection == Section.CALLS && adapter != null) {
       adapter.updateValuedSettingById(R.id.btn_passcode);
       adapter.updateValuedSettingById(R.id.btn_passcodeCalls);
+      adapter.updateValuedSettingById(R.id.btn_ntgCallsAskCamera);
+      adapter.updateValuedSettingById(R.id.btn_ntgCallsDefaultCamera);
       updateCallSettingsReset();
       CallProblems.refresh(tdlib);
     }

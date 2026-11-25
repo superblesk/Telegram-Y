@@ -82,6 +82,7 @@ import org.thunderdog.challegram.tool.Paints;
 import org.thunderdog.challegram.tool.Screen;
 import org.thunderdog.challegram.tool.UI;
 import org.thunderdog.challegram.tool.Views;
+import org.thunderdog.challegram.unsorted.Settings;
 import org.thunderdog.challegram.util.CustomTypefaceSpan;
 import org.thunderdog.challegram.util.EmojiStatusHelper;
 import org.thunderdog.challegram.util.RateLimiter;
@@ -1115,7 +1116,12 @@ public class CallController extends ViewController<CallController.Arguments> imp
           return;
         }
         if (enableCamera) {
-          askCamera.run();
+          if (Settings.instance().ntgCallsAskCamera()) {
+            askCamera.run();
+          } else {
+            callSettings.setCameraFrontFacing(Settings.instance().ntgCallsDefaultCameraFront());
+            applyCameraState.run();
+          }
         } else {
           applyCameraState.run();
         }
