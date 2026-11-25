@@ -3,6 +3,7 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Point;
+import android.text.TextUtils;
 import android.view.Display;
 import android.view.WindowManager;
 
@@ -58,7 +59,7 @@ public class NTgCallsInterface implements CallInterface {
   private static final FramesCallback NO_OP_FRAMES = (callId, mode, device, frames) -> { };
   private static final RemoteSourceChangeCallback NO_OP_REMOTE_SOURCE = (callId, source) -> { };
 
-  public NTgCallsInterface (Tdlib tdlib, TdApi.Call call, TdApi.CallStateReady state, ConnectionStateListener listener) throws ConnectionException, FileNotFoundException {
+  public NTgCallsInterface (Tdlib tdlib, TdApi.Call call, TdApi.CallStateReady state, ConnectionStateListener listener, boolean forceTcp) throws ConnectionException, FileNotFoundException {
     this.tdlib = tdlib;
     this.call = call;
     if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -83,10 +84,13 @@ public class NTgCallsInterface implements CallInterface {
       }
       if (callNetworkState.state == ConnectionState.CONNECTED) {
         listener.onConnectionStateChanged(null, CallState.ESTABLISHED);
-      } else if (callNetworkState.state == ConnectionState.FAILED || callNetworkState.state == ConnectionState.TIMEOUT) {
+      } else if (callNetworkState.state == ConnectionState.FAILED ||
+        callNetworkState.state == ConnectionState.TIMEOUT ||
+        callNetworkState.state == ConnectionState.CLOSED) {
+        // CLOSED also arrives for a remote disconnect, after which NTgCalls removes the call.
         listener.onConnectionStateChanged(null, CallState.FAILED);
       }
-      // CONNECTING and CLOSED are normal transitions: CLOSED follows a regular hangup.
+      // CONNECTING is a normal transition.
     });
     micDescription = new AudioDescription(
       MediaSource.DEVICE,
@@ -143,7 +147,7 @@ public class NTgCallsInterface implements CallInterface {
             webrtc.password,
             webrtc.supportsTurn,
             webrtc.supportsStun,
-            false,
+            forceTcp,
             null
           );
         } else {
@@ -157,12 +161,18 @@ public class NTgCallsInterface implements CallInterface {
             null,
             true,
             false,
-            reflector.isTcp,
+            forceTcp || reflector.isTcp,
             reflector.peerTag
           );
         }
       }).collect(Collectors.toList());
-    ntgcalls.connectP2p(CALL_ID, rtcServers, List.of(state.protocol.libraryVersions), state.allowP2p, null);
+    ntgcalls.connectP2p(
+      CALL_ID,
+      rtcServers,
+      List.of(state.protocol.libraryVersions),
+      state.allowP2p,
+      TextUtils.isEmpty(state.customParameters) ? null : state.customParameters
+    );
   }
 
   @Override

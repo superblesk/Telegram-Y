@@ -1986,7 +1986,7 @@ public class TGCallService extends Service implements
     try {
       if (tgcalls == null) {
         if (BuildConfig.USE_NTGCALLS) {
-          tgcalls = new NTgCallsInterface(tdlib, call, state, stateListener);
+          tgcalls = new NTgCallsInterface(tdlib, call, state, stateListener, forceTcp);
         } else {
           tgcalls = new TgCallsInterface(
             tdlib,
