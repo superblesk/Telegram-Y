@@ -57,6 +57,12 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 
 import org.drinkless.tdlib.TdApi;
+import io.github.pytgcalls.FramesCallback;
+import io.github.pytgcalls.RemoteSourceChangeCallback;
+import org.pytgcalls.ntgcallsx.CallInterface;
+import org.pytgcalls.ntgcallsx.NTgCallsInterface;
+import org.pytgcalls.ntgcallsx.TgCallsInterface;
+import org.thunderdog.challegram.BuildConfig;
 import org.thunderdog.challegram.BaseActivity;
 import org.thunderdog.challegram.Log;
 import org.thunderdog.challegram.R;
@@ -232,12 +238,30 @@ public class TGCallService extends Service implements
   }
 
   private SoundPoolMap soundPoolMap;
-  private @Nullable VoIPInstance tgcalls;
+  private @Nullable CallInterface tgcalls;
   private @Nullable PrivateCallListener callListener;
   private PowerManager.WakeLock cpuWakelock;
   private BluetoothAdapter btAdapter;
 
   private boolean isProximityNear, isHeadsetPlugged;
+
+  public void setFrameCallback(FramesCallback callback) {
+    if (tgcalls != null) {
+      tgcalls.setFrameCallback(callback);
+    }
+  }
+
+  public void setRemoteSourceChangeCallback(RemoteSourceChangeCallback callback) {
+    if (tgcalls != null) {
+      tgcalls.setRemoteSourceChangeCallback(callback);
+    }
+  }
+
+  public void clearVideoCallbacks () {
+    if (tgcalls != null) {
+      tgcalls.clearVideoCallbacks();
+    }
+  }
 
   private final BroadcastReceiver receiver = new BroadcastReceiver() {
     @Override
@@ -728,12 +752,56 @@ public class TGCallService extends Service implements
   }
 
   private CallSettings postponedCallSettings;
+  boolean lastCameraStatus;
+  boolean lastCameraFrontFacing = true;
+  boolean lastScreenSharing;
+  private boolean cameraRestartPending;
+
+  private final Runnable restartCameraAfterSwitch = () -> {
+    cameraRestartPending = false;
+    CallSettings settings = postponedCallSettings;
+    if (settings != null && settings.isCameraSharing()) {
+      tgcalls.setCameraEnabled(true, settings.isCameraFrontFacing());
+    }
+  };
 
   @Override
   public void onCallSettingsChanged (int callId, CallSettings settings) {
     this.postponedCallSettings = settings;
-    if (tgcalls != null) {
-      tgcalls.setMicDisabled(settings != null && settings.isMicMuted());
+    if (tgcalls != null && settings != null) {
+      tgcalls.setMicDisabled(settings.isMicMuted());
+      if (settings.isCameraSharing() != lastCameraStatus || settings.isCameraFrontFacing() != lastCameraFrontFacing) {
+        boolean cameraStatusChanged = settings.isCameraSharing() != lastCameraStatus;
+        boolean wasFrontFacing = lastCameraFrontFacing;
+        lastCameraStatus = settings.isCameraSharing();
+        lastCameraFrontFacing = settings.isCameraFrontFacing();
+        // Re-issue startForeground so Android updates the service type without
+        // dropping foreground state (and with it the microphone grant).
+        if (cameraStatusChanged && ongoingCallNotification != null) {
+          startForegroundOrUpdate(TdlibNotificationManager.ID_FOREGROUND_ONGOING_CALL_NOTIFICATION, ongoingCallNotification, true);
+        }
+        UI.cancel(restartCameraAfterSwitch);
+        if (!cameraStatusChanged && lastCameraStatus && tgcalls instanceof NTgCallsInterface) {
+          // NTgCalls 4.0.0-beta02 reuses one JavaVideoCapturerModule for both cameras.
+          // The old module's delayed release then disposes the capturer right after
+          // switchCamera(), killing the new stream. Stop first, start fresh afterwards.
+          if (!cameraRestartPending) {
+            tgcalls.setCameraEnabled(false, wasFrontFacing);
+            cameraRestartPending = true;
+          }
+          UI.post(restartCameraAfterSwitch, 300);
+        } else {
+          cameraRestartPending = false;
+          tgcalls.setCameraEnabled(lastCameraStatus, lastCameraFrontFacing);
+        }
+      }
+      if (lastScreenSharing != settings.isScreenSharing()) {
+        lastScreenSharing = settings.isScreenSharing();
+        U.stopForeground(this, true, TdlibNotificationManager.ID_FOREGROUND_ONGOING_CALL_NOTIFICATION);
+        ongoingCallNotification = null;
+        showNotification();
+        tgcalls.setScreenShareEnabled(lastScreenSharing);
+      }
     }
     setAudioMode(settings != null ? settings.getSpeakerMode() : CallSettings.SPEAKER_MODE_EARPIECE);
   }
@@ -1314,7 +1382,7 @@ public class TGCallService extends Service implements
   private boolean startForegroundOrUpdate (int notificationId, Notification notification,
     boolean callAnswered) {
     try {
-      U.startForeground(this, notificationId, notification, callAnswered);
+      U.startForeground(this, notificationId, notification, callAnswered, lastScreenSharing, lastCameraStatus);
       foregroundNotificationId = notificationId;
     } catch (IllegalStateException | SecurityException e) {
       if (foregroundNotificationId == 0) {
@@ -1870,6 +1938,12 @@ public class TGCallService extends Service implements
       tgcalls.performDestroy();
       tgcalls = null;
     }
+    UI.cancel(restartCameraAfterSwitch);
+    cameraRestartPending = false;
+    postponedCallSettings = null;
+    lastCameraStatus = false;
+    lastCameraFrontFacing = true;
+    lastScreenSharing = false;
     if (callListener != null && tdlib != null && call != null) {
       tdlib.listeners().unsubscribeFromCallUpdates(call.id, callListener);
       callListener = null;
@@ -1877,8 +1951,8 @@ public class TGCallService extends Service implements
     callInitialized = false; // FIXME?
   }
 
-  private boolean isInitiated () {
-    return tgcalls != null;
+  public boolean isInitiated () {
+    return tgcalls != null && tgcalls.isInitiated();
   }
 
   private void checkInitiated () {
@@ -1919,7 +1993,7 @@ public class TGCallService extends Service implements
         if (newState == CallState.ESTABLISHED) {
           tdlib.dispatchCallStateChanged(call.id, newState);
         } else if (newState == CallState.FAILED) {
-          long connectionId = context.getConnectionId();
+          long connectionId = context != null ? context.getConnectionId() : 0;
           tdlib.context().calls().hangUp(tdlib, call.id, true, connectionId);
         }
       }
@@ -1934,36 +2008,42 @@ public class TGCallService extends Service implements
         tdlib.client().send(new TdApi.SendCallSignalingData(call.id, data), tdlib.silentHandler());
       }
     };
-
-    VoIPInstance tgcallsTemp;
     try {
-      tgcallsTemp = VoIP.instantiateAndConnect(
-        tdlib,
-        call,
-        state,
-        stateListener,
-        forceTcp,
-        callProxy,
-        lastNetworkType,
-        audioGainControlEnabled,
-        echoCancellationStrength,
-        isMicDisabled
-      );
-    } catch (Throwable t) {
-      tgcallsTemp = null;
-    }
-    final VoIPInstance tgcalls = tgcallsTemp;
-
-    if (tgcalls != null) {
-      this.callListener = new PrivateCallListener() {
-        @Override
-        public void onNewCallSignalingDataArrived (int callId, byte[] data) {
-          tgcalls.handleIncomingSignalingData(data);
+      if (tgcalls == null) {
+        if (BuildConfig.USE_NTGCALLS) {
+          tgcalls = new NTgCallsInterface(tdlib, call, state, stateListener, forceTcp);
+        } else {
+          tgcalls = new TgCallsInterface(
+            tdlib,
+            call,
+            state,
+            stateListener,
+            forceTcp,
+            callProxy,
+            lastNetworkType,
+            audioGainControlEnabled,
+            echoCancellationStrength,
+            isMicDisabled
+          );
         }
-      };
-      tdlib.listeners().subscribeToCallUpdates(call.id, callListener);
-      this.tgcalls = tgcalls;
-    } else {
+        this.callListener = new PrivateCallListener() {
+          @Override
+          public void onNewCallSignalingDataArrived (int callId, byte[] data) {
+            if (tgcalls != null) tgcalls.handleIncomingSignalingData(data);
+          }
+        };
+        tdlib.listeners().subscribeToCallUpdates(call.id, callListener);
+        CallSettings cachedSettings = tdlib.cache().getCallSettings(call.id);
+        if (cachedSettings != null) {
+          // MediaProjection consent cannot survive a service restart.
+          if (cachedSettings.isScreenSharing()) {
+            cachedSettings.setScreenSharing(false);
+          }
+          onCallSettingsChanged(call.id, cachedSettings);
+        }
+      }
+    } catch (Throwable e) {
+      Log.e(Log.TAG_VOIP, "Error creating call", e);
       hangUp();
     }
   }
@@ -1976,6 +2056,10 @@ public class TGCallService extends Service implements
 
   public static TGCallService currentInstance () {
     return reference != null ? reference.get() : null;
+  }
+
+  public boolean isVideoSupported () {
+    return tgcalls != null && tgcalls.isVideoSupported();
   }
 
   private boolean logViewed;

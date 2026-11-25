@@ -583,7 +583,7 @@ debugCall id:long debug:string = Ok;
       if (AppContext.get().checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
         BaseActivity activity = UI.getUiContext();
         if (activity != null) {
-          activity.requestMicPermissionForCall((code, permissions, grantResults, grantCount) -> {
+          activity.requestPermissionForCall((code, permissions, grantResults, grantCount) -> {
             if (grantCount == permissions.length) {
               if (call != null) {
                 TdApi.Call updatedCall = tdlib.cache().getCall(call.id);

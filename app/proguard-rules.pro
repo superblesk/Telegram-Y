@@ -90,3 +90,11 @@
 -dontwarn org.openjsse.net.ssl.OpenJSSE
 
 -dontwarn com.google.firebase.analytics.connector.AnalyticsConnector
+
+# NTgCalls (and the WebRTC Java API shipped with it)
+-keep class io.github.pytgcalls.** { *; }
+-keepclassmembers class io.github.pytgcalls.** { *; }
+-keep class org.jni_zero.** { *; }
+-keepclassmembers class org.jni_zero.** { *; }
+-dontwarn org.jni_zero.JniZeroJni
+-keep class org.jni_zero.JniZeroJni { *; }

@@ -226,6 +226,8 @@ public class Settings {
   private static final String KEY_EMOJI_PACK = "settings_emoji_pack";
   private static final String KEY_EMOJI_INSTALLED_PREFIX = "settings_emoji_installed_";
   private static final String KEY_EARPIECE_VIDEO_MODE = "settings_earpiece_video_mode";
+  private static final String KEY_NTG_CALLS_ASK_CAMERA = "settings_ntg_calls_ask_camera";
+  private static final String KEY_NTG_CALLS_DEFAULT_CAMERA_FRONT = "settings_ntg_calls_default_camera_front";
   private static final String KEY_MAX_NIGHT_LUX = "night_lux_max";
   private static final String KEY_MAX_NIGHT_LUX_MULTIPLY = "night_lux_max_multiply";
   private static final String KEY_NIGHT_MODE_SCHEDULED_TIME = "settings_night_mode_schedule";
@@ -6516,6 +6518,22 @@ public class Settings {
 
   public boolean forceTcpInCalls () {
     return checkUtilityFeature(UTILITY_FEATURE_FORCE_TCP_IN_CALLS);
+  }
+
+  public boolean ntgCallsAskCamera () {
+    return getBoolean(KEY_NTG_CALLS_ASK_CAMERA, true);
+  }
+
+  public void setNtgCallsAskCamera (boolean enabled) {
+    putBoolean(KEY_NTG_CALLS_ASK_CAMERA, enabled);
+  }
+
+  public boolean ntgCallsDefaultCameraFront () {
+    return getBoolean(KEY_NTG_CALLS_DEFAULT_CAMERA_FRONT, true);
+  }
+
+  public void setNtgCallsDefaultCameraFront (boolean front) {
+    putBoolean(KEY_NTG_CALLS_DEFAULT_CAMERA_FRONT, front);
   }
 
   public void setForceTdlibRestart (boolean enabled) {

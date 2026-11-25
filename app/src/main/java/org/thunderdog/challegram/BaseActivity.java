@@ -1259,6 +1259,9 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
 
   @Override
   public void onDestroy () {
+    requestCameraCallCallback = null;
+    requestPermissionCallback = null;
+    requestCustomPermissionCallback = null;
     try {
       super.onDestroy();
     } catch (Throwable t) {
@@ -2690,8 +2693,9 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
   // public static final int REQUEST_WRITE_STORAGE = 0x05;
   public static final int REQUEST_FINE_LOCATION = 0x06;
   public static final int REQUEST_CUSTOM = 0x07;
-  public static final int REQUEST_USE_MIC_CALL = 0x08;
+  public static final int REQUEST_PERMISSION_CALL = 0x08;
   public static final int REQUEST_CUSTOM_NEW = 0x09;
+  public static final int REQUEST_CAMERA_CALL = 0x0a;
 
   public void requestCameraPermission () {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -2711,18 +2715,27 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
     }
   }*/
 
-  private ActivityPermissionResult requestMicPermissionCallback;
+  private ActivityPermissionResult requestPermissionCallback;
   private boolean isRequestingMicForCall;
 
   public boolean isRequestingMicForCall () {
     return isRequestingMicForCall;
   }
 
-  public void requestMicPermissionForCall (@Nullable ActivityPermissionResult after) {
+  public void requestPermissionForCall (@Nullable ActivityPermissionResult after) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-      this.requestMicPermissionCallback = after;
+      this.requestPermissionCallback = after;
       this.isRequestingMicForCall = true;
-      requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, REQUEST_USE_MIC_CALL);
+      requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, REQUEST_PERMISSION_CALL);
+    }
+  }
+
+  private ActivityPermissionResult requestCameraCallCallback;
+
+  public void requestCameraPermissionForCall (@Nullable ActivityPermissionResult after) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      this.requestCameraCallCallback = after;
+      requestPermissions(new String[] {Manifest.permission.CAMERA}, REQUEST_CAMERA_CALL);
     }
   }
 
@@ -2811,26 +2824,47 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
   @Override
   public void onRequestPermissionsResult (int requestCode, @NonNull String[] permissions, @NonNull  int[] grantResults) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-    if (requestCode == REQUEST_USE_MIC_CALL) {
+    if (requestCode == REQUEST_PERMISSION_CALL) {
       isRequestingMicForCall = false;
     }
     if (grantResults.length == 0) {
+      if (requestCode == REQUEST_CAMERA_CALL) {
+        requestCameraCallCallback = null;
+      } else if (requestCode == REQUEST_CUSTOM_NEW) {
+        requestCustomPermissionCallback = null;
+      } else if (requestCode == REQUEST_PERMISSION_CALL) {
+        requestPermissionCallback = null;
+      }
       return;
     }
     boolean fallback = false;
     switch (requestCode) {
       case REQUEST_CUSTOM_NEW:
-      case REQUEST_USE_MIC_CALL: {
+      case REQUEST_PERMISSION_CALL: {
         ActivityPermissionResult callback =
           requestCode == REQUEST_CUSTOM_NEW ?
             requestCustomPermissionCallback :
-            requestMicPermissionCallback;
+            requestPermissionCallback;
         if (callback != null) {
           if (requestCode == REQUEST_CUSTOM_NEW) {
             requestCustomPermissionCallback = null;
           } else {
-            requestMicPermissionCallback = null;
+            requestPermissionCallback = null;
           }
+          int grantCount = 0;
+          for (int grantResult : grantResults) {
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+              grantCount++;
+            }
+          }
+          callback.onPermissionResult(requestCode, permissions, grantResults, grantCount);
+        }
+        break;
+      }
+      case REQUEST_CAMERA_CALL: {
+        ActivityPermissionResult callback = requestCameraCallCallback;
+        requestCameraCallCallback = null;
+        if (callback != null) {
           int grantCount = 0;
           for (int grantResult : grantResults) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {
