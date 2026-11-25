@@ -26,6 +26,7 @@ import androidx.media3.decoder.flac.FlacLibrary;
 import androidx.media3.decoder.opus.OpusLibrary;
 import androidx.media3.decoder.vp9.VpxLibrary;
 
+import io.github.pytgcalls.NTgCalls;
 import org.thunderdog.challegram.config.Config;
 
 import java.nio.ByteBuffer;
@@ -147,6 +148,15 @@ public final class N {
 
   // Unavailable in legacy flavor
   public static native String[] getTgCallsVersions ();
+
+  public static String[] getTgCallsLibVersions () {
+    if (BuildConfig.USE_NTGCALLS) {
+      return NTgCalls.getProtocol().library_versions.toArray(new String[0]);
+    } else {
+      return getTgCallsVersions();
+    }
+  }
+
   public static native String toHexString (byte[] array);
 
   private static boolean loaded;
@@ -174,7 +184,7 @@ public final class N {
           VpxLibrary.getVersion(),
           FfmpegLibrary.getVersion(),
           BuildConfig.CALLS_AVAILABLE ?
-            TextUtils.join("+", N.getTgCallsVersions()) :
+            TextUtils.join("+", N.getTgCallsLibVersions()) :
             "disabled"
         ));
       }
