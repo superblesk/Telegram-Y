@@ -26,12 +26,14 @@ set(THIRDPARTY_DIR "${PROJECT_SOURCE_DIR}/third_party")
 set(TDLIB_DIR "${TGX_ROOT_DIR}/tdlib")
 set(UTILS_DIR "${THIRDPARTY_DIR}/jni-utils")
 
-# ENABLE_TGVOIP may be passed by gradle depending on app.ntgcalls
-if(DEFINED ENABLE_TGVOIP)
-elseif(ANDROID_MIN_SDK_VERSION GREATER_EQUAL 21)
-  set(ENABLE_TGVOIP yes)
-else()
-  set(ENABLE_TGVOIP no)
+# Gradle always passes ENABLE_TGVOIP explicitly so that switching app.ntgcalls
+# doesn't leave a stale value in the CMake cache.
+if(NOT DEFINED ENABLE_TGVOIP)
+  if(ANDROID_MIN_SDK_VERSION GREATER_EQUAL 21)
+    set(ENABLE_TGVOIP yes)
+  else()
+    set(ENABLE_TGVOIP no)
+  endif()
 endif()
 
 # Using webp only if building for 32-bit platform

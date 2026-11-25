@@ -1259,6 +1259,9 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
 
   @Override
   public void onDestroy () {
+    requestCameraCallCallback = null;
+    requestPermissionCallback = null;
+    requestCustomPermissionCallback = null;
     try {
       super.onDestroy();
     } catch (Throwable t) {
@@ -2692,6 +2695,7 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
   public static final int REQUEST_CUSTOM = 0x07;
   public static final int REQUEST_PERMISSION_CALL = 0x08;
   public static final int REQUEST_CUSTOM_NEW = 0x09;
+  public static final int REQUEST_CAMERA_CALL = 0x0a;
 
   public void requestCameraPermission () {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -2722,14 +2726,16 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       this.requestPermissionCallback = after;
       this.isRequestingMicForCall = true;
-      ArrayList<String> permissions = new ArrayList<>();
-      if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-        permissions.add(Manifest.permission.CAMERA);
-      }
-      if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-        permissions.add(Manifest.permission.RECORD_AUDIO);
-      }
-      requestPermissions(permissions.toArray(new String[0]), REQUEST_PERMISSION_CALL);
+      requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, REQUEST_PERMISSION_CALL);
+    }
+  }
+
+  private ActivityPermissionResult requestCameraCallCallback;
+
+  public void requestCameraPermissionForCall (@Nullable ActivityPermissionResult after) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      this.requestCameraCallCallback = after;
+      requestPermissions(new String[] {Manifest.permission.CAMERA}, REQUEST_CAMERA_CALL);
     }
   }
 
@@ -2822,6 +2828,13 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
       isRequestingMicForCall = false;
     }
     if (grantResults.length == 0) {
+      if (requestCode == REQUEST_CAMERA_CALL) {
+        requestCameraCallCallback = null;
+      } else if (requestCode == REQUEST_CUSTOM_NEW) {
+        requestCustomPermissionCallback = null;
+      } else if (requestCode == REQUEST_PERMISSION_CALL) {
+        requestPermissionCallback = null;
+      }
       return;
     }
     boolean fallback = false;
@@ -2838,6 +2851,20 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
           } else {
             requestPermissionCallback = null;
           }
+          int grantCount = 0;
+          for (int grantResult : grantResults) {
+            if (grantResult == PackageManager.PERMISSION_GRANTED) {
+              grantCount++;
+            }
+          }
+          callback.onPermissionResult(requestCode, permissions, grantResults, grantCount);
+        }
+        break;
+      }
+      case REQUEST_CAMERA_CALL: {
+        ActivityPermissionResult callback = requestCameraCallCallback;
+        requestCameraCallCallback = null;
+        if (callback != null) {
           int grantCount = 0;
           for (int grantResult : grantResults) {
             if (grantResult == PackageManager.PERMISSION_GRANTED) {

@@ -19,6 +19,21 @@ plugins {
 }
 
 val config = tgxConfig.config.get()
+
+// When NTgCalls is disabled we still need its Java API to compile the shared call code,
+// but not its bundled WebRTC classes: they duplicate and may shadow the WebRTC Java API
+// used by the native tgcalls implementation.
+val ntgCallsClassesJar = layout.buildDirectory.file("generated/ntgcalls/classes.jar")
+val extractNtgCallsClasses by tasks.registering(Copy::class) {
+  val aar = configurations.detachedConfiguration(dependencies.create(libs.pytgcalls.ntgcalls.get()))
+    .filter { it.name.endsWith(".aar") }
+    .single()
+  from(zipTree(aar)) {
+    include("classes.jar")
+  }
+  into(ntgCallsClassesJar.get().asFile.parentFile)
+}
+
 val customGoogleServices = config.googleServicesFile?.let { rootDir.resolve(it) }
 val usedGoogleServices = customGoogleServices ?: file("google-services.json")
 if (customGoogleServices != null && !customGoogleServices.exists()) {
@@ -674,11 +689,9 @@ android {
             "-DCMAKE_CXX_FLAGS=-std=c++17 ${flags.joinToString(" ")}",
             "-DTGX_FLAVOR=${variant.flavor}",
             "-DTGX_ROOT_DIR=${project.isolated.rootProject.projectDirectory.asFile.absoluteFile.invariantSeparatorsPath}",
-            "-DFFMPEG_LIBS=${Config.FFMPEG_LIBS.joinToString(";")}"
+            "-DFFMPEG_LIBS=${Config.FFMPEG_LIBS.joinToString(";")}",
+            "-DENABLE_TGVOIP=${if (variant.isLegacy || config.useNTgCalls) "no" else "yes"}"
           )
-          if (config.useNTgCalls) {
-            arguments("-DENABLE_TGVOIP=no")
-          }
 
           val dirs = mapOf(
             "ANDROIDX_MEDIA_DIR" to layout.buildDirectory.dir(
@@ -870,6 +883,9 @@ android {
       if (useLegacyPackaging) {
         variant.packaging.dex.useLegacyPackaging = true
         variant.packaging.jniLibs.useLegacyPackaging = true
+      }
+      if (!config.useNTgCalls) {
+        variant.packaging.jniLibs.excludes.add("**/libntgcalls.so")
       }
     }
 
@@ -1193,7 +1209,6 @@ dependencies {
     exclude(group = "com.google.firebase", module = "firebase-analytics")
     exclude(group = "com.google.firebase", module = "firebase-measurement-connector")
   }
-  // implementation("com.google.firebase:firebase-appcheck-safetynet:16.1.2")
   // Play Integrity: https://developer.android.com/google/play/integrity/reference/com/google/android/play/core/release-notes
   flavorImplementation(
     libs.google.play.integrity.legacy,
@@ -1273,6 +1288,8 @@ dependencies {
   // NTgCalls: https://github.com/pytgcalls/ntgcalls/
   if (config.useNTgCalls) {
     implementation(libs.pytgcalls.ntgcalls)
+  } else {
+    implementation(files(ntgCallsClassesJar) { builtBy(extractNtgCallsClasses) })
   }
 
   // Compiler warnings

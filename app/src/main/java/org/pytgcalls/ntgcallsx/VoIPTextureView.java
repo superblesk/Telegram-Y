@@ -28,11 +28,13 @@ import androidx.annotation.NonNull;
 
 import org.thunderdog.challegram.R;
 import org.thunderdog.challegram.U;
+import org.thunderdog.challegram.core.Lang;
 import org.thunderdog.challegram.charts.CubicBezierInterpolator;
 import org.thunderdog.challegram.charts.LayoutHelper;
 import org.thunderdog.challegram.telegram.TdlibManager;
 import org.thunderdog.challegram.tool.Fonts;
 import org.thunderdog.challegram.tool.Screen;
+import org.webrtc.EglBase;
 import org.webrtc.RendererCommon;
 import org.webrtc.TextureViewRenderer;
 import org.webrtc.VideoFrame;
@@ -141,7 +143,7 @@ public class VoIPTextureView extends FrameLayout {
     screencastView.addView(screencastImage, LayoutHelper.createFrame(82, 82, Gravity.CENTER, 0, 0, 0, 60));
 
     screencastText = new TextView(getContext());
-    screencastText.setText("Sharing your screen");
+    screencastText.setText(Lang.getString(R.string.VoipSharingYourScreen));
     screencastText.setGravity(Gravity.CENTER);
     screencastText.setLineSpacing(Screen.dp(2), 1.0f);
     screencastText.setTextColor(0xffffffff);
@@ -227,16 +229,19 @@ public class VoIPTextureView extends FrameLayout {
   }
 
   public void saveCameraLastBitmap() {
-    if (isCamera) {
-      cameraLastBitmap = Bitmap.createBitmap(150, 150, Bitmap.Config.ARGB_8888);
-      cameraLastBitmap = renderer.getBitmap(cameraLastBitmap);
-      U.blurBitmap(cameraLastBitmap, 3, 1);
-      try {
-        File file = new File(TdlibManager.getTgvoipDirectory(), "voip_icthumb.jpg");
-        FileOutputStream stream = new FileOutputStream(file);
-        cameraLastBitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream);
-        stream.close();
-      } catch (Throwable ignored) {}
+    if (isCamera && rendererInitialized) {
+      Bitmap bitmap = Bitmap.createBitmap(150, 150, Bitmap.Config.ARGB_8888);
+      bitmap = renderer.getBitmap(bitmap);
+      if (bitmap != null) {
+        cameraLastBitmap = bitmap;
+        U.blurBitmap(cameraLastBitmap, 3, 1);
+        try {
+          File file = new File(TdlibManager.getTgvoipDirectory(), "voip_icthumb.jpg");
+          FileOutputStream stream = new FileOutputStream(file);
+          cameraLastBitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream);
+          stream.close();
+        } catch (Throwable ignored) {}
+      }
     }
   }
 
@@ -431,13 +436,23 @@ public class VoIPTextureView extends FrameLayout {
     animateWithParent = b;
   }
 
+  private boolean rendererInitialized;
+
+  public void initRenderer (EglBase.Context context) {
+    if (!rendererInitialized) {
+      renderer.init(context, null);
+      rendererInitialized = true;
+    }
+  }
+
   public void stopCapturing() {
-    if (renderer != null) {
+    if (renderer != null && rendererInitialized) {
       saveCameraLastBitmap();
       showLastFrame();
       isFirstFrameRendered = false;
       runAnimation = true;
       renderer.release();
+      rendererInitialized = false;
       imageView.setAlpha(1f);
       if (isCamera) {
         imageView.setVisibility(View.VISIBLE);

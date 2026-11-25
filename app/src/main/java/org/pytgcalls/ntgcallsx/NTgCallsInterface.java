@@ -10,6 +10,7 @@ import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import org.drinkless.tdlib.TdApi;
 import io.github.pytgcalls.ConnectionInfo;
+import io.github.pytgcalls.ConnectionKind;
 import io.github.pytgcalls.ConnectionState;
 import io.github.pytgcalls.FramesCallback;
 import io.github.pytgcalls.NTgCalls;
@@ -17,8 +18,10 @@ import io.github.pytgcalls.RemoteSourceChangeCallback;
 import io.github.pytgcalls.exceptions.ConnectionException;
 import io.github.pytgcalls.exceptions.ConnectionNotFoundException;
 import io.github.pytgcalls.media.AudioDescription;
+import io.github.pytgcalls.media.DeviceInfo;
 import io.github.pytgcalls.media.Format;
 import io.github.pytgcalls.media.MediaDescription;
+import io.github.pytgcalls.media.MediaDevices;
 import io.github.pytgcalls.media.MediaSource;
 import io.github.pytgcalls.media.StreamMode;
 import io.github.pytgcalls.media.VideoDescription;
@@ -32,6 +35,9 @@ import org.thunderdog.challegram.voip.ConnectionStateListener;
 import org.thunderdog.challegram.voip.NetworkStats;
 import org.thunderdog.challegram.voip.VoIPInstance;
 import org.thunderdog.challegram.voip.annotation.CallState;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.FileNotFoundException;
 import java.util.Arrays;
@@ -47,33 +53,49 @@ public class NTgCallsInterface implements CallInterface {
   private static final int AUTO_DETECT = -1;
   private final Tdlib tdlib;
   private final TdApi.Call call;
+  private volatile boolean destroying;
+
+  private static final FramesCallback NO_OP_FRAMES = (callId, mode, device, frames) -> { };
+  private static final RemoteSourceChangeCallback NO_OP_REMOTE_SOURCE = (callId, source) -> { };
 
   public NTgCallsInterface (Tdlib tdlib, TdApi.Call call, TdApi.CallStateReady state, ConnectionStateListener listener) throws ConnectionException, FileNotFoundException {
     this.tdlib = tdlib;
     this.call = call;
+    if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+      throw new SecurityException("No microphone permission");
+    }
+    MediaDevices devices = NTgCalls.getMediaDevices();
+    if (devices.microphone.isEmpty() || devices.speaker.isEmpty()) {
+      throw new IllegalStateException("No audio devices available");
+    }
     ntgcalls = new NTgCalls();
-    ntgcalls.onSignalingData((callId, data) -> listener.onSignallingDataEmitted(data));
+    ntgcalls.onSignalingData((callId, data) -> {
+      if (!destroying) {
+        listener.onSignallingDataEmitted(data);
+      }
+    });
     ntgcalls.onConnectionChange((chatId, callNetworkState) -> {
+      if (callNetworkState.kind != ConnectionKind.NORMAL) {
+        return; // presentation connection state must not finish the main call
+      }
+      if (destroying) {
+        return; // local hangup already in progress
+      }
       if (callNetworkState.state == ConnectionState.CONNECTED) {
         listener.onConnectionStateChanged(null, CallState.ESTABLISHED);
-      } else if (callNetworkState.state != ConnectionState.CONNECTING) {
+      } else if (callNetworkState.state == ConnectionState.FAILED || callNetworkState.state == ConnectionState.TIMEOUT) {
         listener.onConnectionStateChanged(null, CallState.FAILED);
       }
+      // CONNECTING and CLOSED are normal transitions: CLOSED follows a regular hangup.
     });
     micDescription = new AudioDescription(
       MediaSource.DEVICE,
       48000,
       1,
-      NTgCalls.getMediaDevices().microphone.get(0).metadata,
+      devices.microphone.get(0).metadata,
       true
     );
     ntgcalls.createP2pCall(CALL_ID);
-    if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-      throw new SecurityException("No microphone permission");
-    }
-    if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-      throw new SecurityException("No microphone permission");
-    }
     ntgcalls.setStreamSources(
       CALL_ID,
       StreamMode.CAPTURE,
@@ -92,7 +114,7 @@ public class NTgCallsInterface implements CallInterface {
           MediaSource.DEVICE,
           48000,
           2,
-          NTgCalls.getMediaDevices().speaker.get(0).metadata,
+          devices.speaker.get(0).metadata,
           true
         ),
         null,
@@ -169,7 +191,7 @@ public class NTgCallsInterface implements CallInterface {
 
   @Override
   public void setAudioOutputGainControlEnabled (boolean enabled) {
-
+    // NTgCalls has no public API for output gain control; WebRTC handles it internally.
   }
 
   @Override
@@ -183,7 +205,7 @@ public class NTgCallsInterface implements CallInterface {
 
   @Override
   public void setEchoCancellationStrength (int strength) {
-
+    // NTgCalls has no public API for the echo cancellation strength.
   }
 
   @Override
@@ -202,14 +224,17 @@ public class NTgCallsInterface implements CallInterface {
   @Override
   public void setCameraEnabled (boolean enabled, boolean front) {
     try {
-      if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-        throw new SecurityException("No microphone permission");
-      }
-      if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-        throw new SecurityException("No microphone permission");
-      }
       if (enabled) {
-        String cameraId = NTgCalls.getMediaDevices().camera.get(front ? 1 : 0).metadata;
+        if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+          Log.w(Log.TAG_VOIP, "No camera permission, ignoring camera request");
+          return;
+        }
+        var cameras = NTgCalls.getMediaDevices().camera;
+        String cameraId = findCameraId(cameras, front);
+        if (cameraId == null) {
+          Log.w(Log.TAG_VOIP, "No camera available for the call");
+          return;
+        }
         ntgcalls.setStreamSources(
           CALL_ID,
           StreamMode.CAPTURE,
@@ -248,13 +273,12 @@ public class NTgCallsInterface implements CallInterface {
   public void setScreenShareEnabled (boolean enabled) {
     var size = getScreenCaptureSize();
     try {
-      if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-        throw new SecurityException("No microphone permission");
-      }
-      if (ContextCompat.checkSelfPermission(AppContext.get(), Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-        throw new SecurityException("No microphone permission");
-      }
       if (enabled) {
+        var screens = NTgCalls.getMediaDevices().screen;
+        if (screens.isEmpty()) {
+          Log.w(Log.TAG_VOIP, "No screen capture source available");
+          return;
+        }
         ntgcalls.setStreamSources(
           CALL_ID,
           StreamMode.CAPTURE,
@@ -267,7 +291,7 @@ public class NTgCallsInterface implements CallInterface {
               size.x,
               size.y,
               30,
-              NTgCalls.getMediaDevices().screen.get(0).metadata,
+              screens.get(0).metadata,
               true
             )
           )
@@ -296,16 +320,24 @@ public class NTgCallsInterface implements CallInterface {
 
   @Override
   public void setNetworkType (int type) {
-
+    // NTgCalls manages network candidates internally.
   }
 
   @Override
   public void getNetworkStats (NetworkStats stats) {
+    // NTgCalls doesn't expose per-interface byte counters.
+  }
 
+  @Override
+  public void clearVideoCallbacks () {
+    setFrameCallback(NO_OP_FRAMES);
+    setRemoteSourceChangeCallback(NO_OP_REMOTE_SOURCE);
   }
 
   @Override
   public void performDestroy () {
+    destroying = true;
+    clearVideoCallbacks();
     try {
       ntgcalls.stop(CALL_ID);
     } catch (ConnectionNotFoundException e) {
@@ -315,7 +347,7 @@ public class NTgCallsInterface implements CallInterface {
 
   @Override
   public CharSequence collectDebugLog () {
-    return null;
+    return "NTgCalls " + BuildConfig.VERSION_NAME + ", cpu usage: " + (int) (ntgcalls.cpuUsage() * 100) + "%";
   }
 
   @Override
@@ -341,6 +373,21 @@ public class NTgCallsInterface implements CallInterface {
   @Override
   public String getLibraryVersion () {
     return BuildConfig.VERSION_NAME;
+  }
+
+  private static @Nullable String findCameraId (List<DeviceInfo> cameras, boolean front) {
+    if (cameras.isEmpty()) {
+      return null;
+    }
+    String fallback = cameras.get(0).metadata;
+    for (DeviceInfo camera : cameras) {
+      try {
+        if (new JSONObject(camera.metadata).optBoolean("is_front", !front) == front) {
+          return camera.metadata;
+        }
+      } catch (JSONException ignored) { }
+    }
+    return fallback;
   }
 
   private static Point getScreenCaptureSize() {

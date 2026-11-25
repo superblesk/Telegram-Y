@@ -257,6 +257,12 @@ public class TGCallService extends Service implements
     }
   }
 
+  public void clearVideoCallbacks () {
+    if (tgcalls != null) {
+      tgcalls.clearVideoCallbacks();
+    }
+  }
+
   private final BroadcastReceiver receiver = new BroadcastReceiver() {
     @Override
     public void onReceive (Context context, Intent intent) {
@@ -756,8 +762,14 @@ public class TGCallService extends Service implements
     if (tgcalls != null && settings != null) {
       tgcalls.setMicDisabled(settings.isMicMuted());
       if (settings.isCameraSharing() != lastCameraStatus || settings.isCameraFrontFacing() != lastCameraFrontFacing) {
+        boolean cameraStatusChanged = settings.isCameraSharing() != lastCameraStatus;
         lastCameraStatus = settings.isCameraSharing();
         lastCameraFrontFacing = settings.isCameraFrontFacing();
+        // Re-issue startForeground so Android updates the service type without
+        // dropping foreground state (and with it the microphone grant).
+        if (cameraStatusChanged && ongoingCallNotification != null) {
+          startForegroundOrUpdate(TdlibNotificationManager.ID_FOREGROUND_ONGOING_CALL_NOTIFICATION, ongoingCallNotification, true);
+        }
         tgcalls.setCameraEnabled(lastCameraStatus, lastCameraFrontFacing);
       }
       if (lastScreenSharing != settings.isScreenSharing()) {
@@ -1347,7 +1359,7 @@ public class TGCallService extends Service implements
   private boolean startForegroundOrUpdate (int notificationId, Notification notification,
     boolean callAnswered) {
     try {
-      U.startForeground(this, notificationId, notification, callAnswered, lastScreenSharing);
+      U.startForeground(this, notificationId, notification, callAnswered, lastScreenSharing, lastCameraStatus);
       foregroundNotificationId = notificationId;
     } catch (IllegalStateException | SecurityException e) {
       if (foregroundNotificationId == 0) {
@@ -1903,6 +1915,10 @@ public class TGCallService extends Service implements
       tgcalls.performDestroy();
       tgcalls = null;
     }
+    postponedCallSettings = null;
+    lastCameraStatus = false;
+    lastCameraFrontFacing = true;
+    lastScreenSharing = false;
     if (callListener != null && tdlib != null && call != null) {
       tdlib.listeners().unsubscribeFromCallUpdates(call.id, callListener);
       callListener = null;
@@ -1992,6 +2008,14 @@ public class TGCallService extends Service implements
           }
         };
         tdlib.listeners().subscribeToCallUpdates(call.id, callListener);
+        CallSettings cachedSettings = tdlib.cache().getCallSettings(call.id);
+        if (cachedSettings != null) {
+          // MediaProjection consent cannot survive a service restart.
+          if (cachedSettings.isScreenSharing()) {
+            cachedSettings.setScreenSharing(false);
+          }
+          onCallSettingsChanged(call.id, cachedSettings);
+        }
       }
     } catch (Throwable e) {
       Log.e(Log.TAG_VOIP, "Error creating call", e);

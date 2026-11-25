@@ -49,6 +49,11 @@ public class TgCallsInterface implements CallInterface{
   }
 
   @Override
+  public void clearVideoCallbacks () {
+
+  }
+
+  @Override
   public long getCallDuration () {
     return voIPInstance.getCallDuration();
   }

@@ -14,6 +14,8 @@ public interface CallInterface {
 
   void setRemoteSourceChangeCallback(RemoteSourceChangeCallback callback);
 
+  void clearVideoCallbacks();
+
   long getCallDuration();
 
   void setAudioOutputGainControlEnabled(boolean enabled);
