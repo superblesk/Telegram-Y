@@ -7,5 +7,5 @@ plugins {
 }
 
 if (rootDir.resolve("tests/.git").exists()) {
-  apply(plugin = "tgx-tests-root")
+  apply(plugin = "tgy-tests-root")
 }
