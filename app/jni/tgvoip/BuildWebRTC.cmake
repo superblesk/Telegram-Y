@@ -2512,12 +2512,11 @@ add_library(webrtc STATIC
 
 target_sources(webrtc PRIVATE
   "${WEBRTC_DIR}/rtc_base/system/warn_current_thread_is_deadlocked.cc"
-  "${WEBRTC_DIR}/rtc_base/task_queue_libevent.cc"
   "${WEBRTC_DIR}/rtc_base/task_queue_stdlib.cc"
 
   "${WEBRTC_DIR}/api/field_trials.cc"
   "${WEBRTC_DIR}/api/numerics/samples_stats_counter.cc"
-  "${WEBRTC_DIR}/api/task_queue/default_task_queue_factory_libevent.cc"
+  "${WEBRTC_DIR}/api/task_queue/default_task_queue_factory_stdlib.cc"
   "${WEBRTC_DIR}/api/voip/voip_engine_factory.cc"
   "${WEBRTC_DIR}/api/video/rtp_video_frame_assembler.cc"
   "${WEBRTC_DIR}/api/video_codecs/spatial_layer.cc"
@@ -2626,25 +2625,6 @@ target_sources(webrtc PRIVATE
 target_include_directories(webrtc PRIVATE
   "${TGCALLS_DEPS_DIR}/webrtc_deps"
   "${TGCALLS_DEPS_DIR}/crc32c/include"
-)
-
-# libevent
-
-target_sources(webrtc PRIVATE
-  "${TGCALLS_DEPS_DIR}/libevent/buffer.c"
-  "${TGCALLS_DEPS_DIR}/libevent/epoll.c"
-  "${TGCALLS_DEPS_DIR}/libevent/evbuffer.c"
-  "${TGCALLS_DEPS_DIR}/libevent/evdns.c"
-  "${TGCALLS_DEPS_DIR}/libevent/event.c"
-  "${TGCALLS_DEPS_DIR}/libevent/event_tagging.c"
-  "${TGCALLS_DEPS_DIR}/libevent/evrpc.c"
-  "${TGCALLS_DEPS_DIR}/libevent/evutil.c"
-  "${TGCALLS_DEPS_DIR}/libevent/http.c"
-  "${TGCALLS_DEPS_DIR}/libevent/log.c"
-  "${TGCALLS_DEPS_DIR}/libevent/poll.c"
-  "${TGCALLS_DEPS_DIR}/libevent/select.c"
-  "${TGCALLS_DEPS_DIR}/libevent/signal.c"
-  "${TGCALLS_DEPS_DIR}/libevent/strlcpy.c"
 )
 
 # sdk

@@ -50,7 +50,7 @@
 	branch = yellowbilled
 [submodule "tdlib"]
 	path = tdlib
-	url = https://github.com/TGX-Android/tdlib
+	url = https://github.com/superblesk/tdlib-tdy
 	shallow = true
 	branch = main
 [submodule "jni-utils"]
@@ -113,11 +113,6 @@
 	url = https://github.com/TGX-Android/tgcalls
 	shallow = true
 	branch = production
-[submodule "libevent"]
-	path = app/jni/tgvoip/third_party/libevent
-	url = https://github.com/TGX-Android/libevent
-	shallow = true
-	branch = main
 [submodule "crc32c"]
 	path = app/jni/tgvoip/third_party/crc32c
 	url = https://github.com/google/crc32c
