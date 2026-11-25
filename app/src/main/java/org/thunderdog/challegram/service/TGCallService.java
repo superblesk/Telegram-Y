@@ -755,6 +755,15 @@ public class TGCallService extends Service implements
   boolean lastCameraStatus;
   boolean lastCameraFrontFacing = true;
   boolean lastScreenSharing;
+  private boolean cameraRestartPending;
+
+  private final Runnable restartCameraAfterSwitch = () -> {
+    cameraRestartPending = false;
+    CallSettings settings = postponedCallSettings;
+    if (settings != null && settings.isCameraSharing()) {
+      tgcalls.setCameraEnabled(true, settings.isCameraFrontFacing());
+    }
+  };
 
   @Override
   public void onCallSettingsChanged (int callId, CallSettings settings) {
@@ -763,6 +772,7 @@ public class TGCallService extends Service implements
       tgcalls.setMicDisabled(settings.isMicMuted());
       if (settings.isCameraSharing() != lastCameraStatus || settings.isCameraFrontFacing() != lastCameraFrontFacing) {
         boolean cameraStatusChanged = settings.isCameraSharing() != lastCameraStatus;
+        boolean wasFrontFacing = lastCameraFrontFacing;
         lastCameraStatus = settings.isCameraSharing();
         lastCameraFrontFacing = settings.isCameraFrontFacing();
         // Re-issue startForeground so Android updates the service type without
@@ -770,7 +780,20 @@ public class TGCallService extends Service implements
         if (cameraStatusChanged && ongoingCallNotification != null) {
           startForegroundOrUpdate(TdlibNotificationManager.ID_FOREGROUND_ONGOING_CALL_NOTIFICATION, ongoingCallNotification, true);
         }
-        tgcalls.setCameraEnabled(lastCameraStatus, lastCameraFrontFacing);
+        UI.cancel(restartCameraAfterSwitch);
+        if (!cameraStatusChanged && lastCameraStatus && tgcalls instanceof NTgCallsInterface) {
+          // NTgCalls 4.0.0-beta02 reuses one JavaVideoCapturerModule for both cameras.
+          // The old module's delayed release then disposes the capturer right after
+          // switchCamera(), killing the new stream. Stop first, start fresh afterwards.
+          if (!cameraRestartPending) {
+            tgcalls.setCameraEnabled(false, wasFrontFacing);
+            cameraRestartPending = true;
+          }
+          UI.post(restartCameraAfterSwitch, 300);
+        } else {
+          cameraRestartPending = false;
+          tgcalls.setCameraEnabled(lastCameraStatus, lastCameraFrontFacing);
+        }
       }
       if (lastScreenSharing != settings.isScreenSharing()) {
         lastScreenSharing = settings.isScreenSharing();
@@ -1915,6 +1938,8 @@ public class TGCallService extends Service implements
       tgcalls.performDestroy();
       tgcalls = null;
     }
+    UI.cancel(restartCameraAfterSwitch);
+    cameraRestartPending = false;
     postponedCallSettings = null;
     lastCameraStatus = false;
     lastCameraFrontFacing = true;
