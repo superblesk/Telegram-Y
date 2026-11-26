@@ -228,6 +228,7 @@ public class Settings {
   private static final String KEY_EARPIECE_VIDEO_MODE = "settings_earpiece_video_mode";
   private static final String KEY_NTG_CALLS_ASK_CAMERA = "settings_ntg_calls_ask_camera";
   private static final String KEY_NTG_CALLS_DEFAULT_CAMERA_FRONT = "settings_ntg_calls_default_camera_front";
+  private static final String KEY_CALL_EMOJI_HINT_SHOWN = "settings_call_emoji_hint_shown";
   private static final String KEY_MAX_NIGHT_LUX = "night_lux_max";
   private static final String KEY_MAX_NIGHT_LUX_MULTIPLY = "night_lux_max_multiply";
   private static final String KEY_NIGHT_MODE_SCHEDULED_TIME = "settings_night_mode_schedule";
@@ -6534,6 +6535,18 @@ public class Settings {
 
   public void setNtgCallsDefaultCameraFront (boolean front) {
     putBoolean(KEY_NTG_CALLS_DEFAULT_CAMERA_FRONT, front);
+  }
+
+  public boolean wasCallEmojiHintShown () {
+    return getBoolean(KEY_CALL_EMOJI_HINT_SHOWN, false);
+  }
+
+  public void setCallEmojiHintShown (boolean shown) {
+    if (shown) {
+      putBoolean(KEY_CALL_EMOJI_HINT_SHOWN, true);
+    } else {
+      remove(KEY_CALL_EMOJI_HINT_SHOWN);
+    }
   }
 
   public void setForceTdlibRestart (boolean enabled) {

@@ -423,11 +423,21 @@ public class ProfileController extends ViewController<ProfileController.Args> im
       realMenu.setLayoutParams(FrameLayoutFix.newParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Lang.rtl() ? Gravity.LEFT : Gravity.RIGHT));
 
       HeaderButton callButton = null;
+      HeaderButton videoCallButton = null;
 
       int buttonColorId = getHeaderIconColorId();
 
       if (mode == Mode.SECRET || mode == Mode.USER) {
-        callButton = header.addButton(realMenu, R.id.menu_btn_call, R.drawable.baseline_phone_24, buttonColorId, this, Screen.dp(48f));
+        // HeaderView inserts at index 0 for RTL, at the end for LTR: keep visual order video, then voice.
+        if (Lang.rtl()) {
+          callButton = header.addButton(realMenu, R.id.menu_btn_call, R.drawable.baseline_phone_24, buttonColorId, this, Screen.dp(48f));
+          videoCallButton = header.addButton(realMenu, R.id.menu_btn_video_call, R.drawable.baseline_videocam_24, buttonColorId, this, Screen.dp(48f));
+        } else {
+          videoCallButton = header.addButton(realMenu, R.id.menu_btn_video_call, R.drawable.baseline_videocam_24, buttonColorId, this, Screen.dp(48f));
+          callButton = header.addButton(realMenu, R.id.menu_btn_call, R.drawable.baseline_phone_24, buttonColorId, this, Screen.dp(48f));
+        }
+        videoCallButton.setVisibility(BuildConfig.USE_NTGCALLS ? View.VISIBLE : View.GONE);
+        videoCallButton.setAlpha(userFull != null && (userFull.canBeCalled || userFull.hasPrivateCalls) ? 1f : 0f);
         callButton.setAlpha(userFull != null && (userFull.canBeCalled || userFull.hasPrivateCalls) ? 1f : 0f);
       }
 
@@ -436,6 +446,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
         headerButton.forceValue(tdlib.ui().getTTLShort(chat.id), tdlib.canChangeMessageAutoDeleteTime(chat.id));
         if (!headerButton.getIsVisible()) {
           callButton.setTranslationX(Screen.dp(StopwatchHeaderButton.WIDTH));
+          videoCallButton.setTranslationX(Screen.dp(StopwatchHeaderButton.WIDTH));
         }
       }
       if (id == R.id.menu_profile || id == R.id.menu_profile_bot) {
@@ -488,6 +499,10 @@ public class ProfileController extends ViewController<ProfileController.Args> im
     } else if (id == R.id.menu_btn_call) {
       if (userFull != null) {
         tdlib.context().calls().makeCall(this, user.id, userFull);
+      }
+    } else if (id == R.id.menu_btn_video_call) {
+      if (userFull != null) {
+        tdlib.context().calls().makeVideoCall(this, user.id, userFull);
       }
       /*case R.id.menu_btn_edit: {
         if (supergroupFull != null) {
@@ -2536,8 +2551,10 @@ public class ProfileController extends ViewController<ProfileController.Args> im
   }
 
   private void checkUserButtons () {
-    if (headerView != null && !isEditing()) {
-      headerView.updateButtonAlpha(getMenuId(), R.id.menu_btn_call, BuildConfig.CALLS_AVAILABLE && (userFull.canBeCalled || userFull.hasPrivateCalls) ? 1f : 0f);
+    if (headerView != null && !isEditing() && userFull != null) {
+      float alpha = BuildConfig.CALLS_AVAILABLE && (userFull.canBeCalled || userFull.hasPrivateCalls) ? 1f : 0f;
+      headerView.updateButtonAlpha(getMenuId(), R.id.menu_btn_call, alpha);
+      headerView.updateButtonAlpha(getMenuId(), R.id.menu_btn_video_call, alpha);
     }
   }
 
@@ -6398,6 +6415,7 @@ public class ProfileController extends ViewController<ProfileController.Args> im
         final boolean res = tdlib.ui().updateTTLButton(getMenuId(), headerView, chat, false);
         if (headerView != null) {
           headerView.updateButton(getMenuId(), R.id.menu_btn_call, data -> data.setTranslationX(res ? 0f : Screen.dp(StopwatchHeaderButton.WIDTH)));
+          headerView.updateButton(getMenuId(), R.id.menu_btn_video_call, data -> data.setTranslationX(res ? 0f : Screen.dp(StopwatchHeaderButton.WIDTH)));
         }
       }
     });

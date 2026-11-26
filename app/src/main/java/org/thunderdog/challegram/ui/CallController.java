@@ -68,6 +68,7 @@ import org.thunderdog.challegram.core.Lang;
 import org.thunderdog.challegram.data.TD;
 import org.thunderdog.challegram.emoji.Emoji;
 import org.thunderdog.challegram.navigation.ActivityResultHandler;
+import org.thunderdog.challegram.navigation.TooltipOverlayView.TooltipInfo;
 import org.thunderdog.challegram.navigation.ViewController;
 import org.thunderdog.challegram.service.TGCallService;
 import org.thunderdog.challegram.support.ViewSupport;
@@ -235,6 +236,8 @@ public class CallController extends ViewController<CallController.Arguments> imp
   private @Nullable TdApi.User user;
   private CallSettings callSettings;
   private boolean hadEmojiSinceStart;
+  private boolean emojiTooltipShown;
+  private TooltipInfo emojiTooltip;
 
   @Override
   public void setArguments (Arguments args) {
@@ -269,6 +272,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
   }
   private VoIPFloatingLayout callingUserMiniFloatingLayout, currentUserCameraFloatingLayout;
   private VoIPTextureView currentUserTextureView, callingUserTextureView;
+  private CallCameraPreview preCallCameraPreview;
 
   private static class CallStrengthView extends View {
     private final ViewHandler handler;
@@ -552,6 +556,12 @@ public class CallController extends ViewController<CallController.Arguments> imp
     callingUserMiniFloatingLayout.addView(callingUserMiniTextureRenderer, FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
 
     contentView.addView(callingUserMiniFloatingLayout);
+
+    // Local preview above the video surfaces, but below the call controls.
+    preCallCameraPreview = new CallCameraPreview(context);
+    preCallCameraPreview.getView().setVisibility(View.GONE);
+    contentView.addView(preCallCameraPreview.getView(), FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
     FrameLayoutFix.LayoutParams params = FrameLayoutFix.newParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
 
     // Top-left corner
@@ -859,6 +869,9 @@ public class CallController extends ViewController<CallController.Arguments> imp
     tdlib.cache().addUserDataListener(call.userId, this);
 
     this.callSettings = tdlib.cache().getCallSettings(call.id);
+    if (callSettings != null && callSettings.isCameraSharing()) {
+      startPreCallCameraPreview(callSettings.isCameraFrontFacing());
+    }
 
     setTexts();
     updateCallState();
@@ -980,6 +993,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
     UI.cancel(hideUiRunnable);
     setUiHidden(false, false);
     setKeepScreenOn(false);
+    stopPreCallCameraPreview();
     if (!UI.isTablet()) {
       context().setOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
@@ -1093,6 +1107,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
     if (viewId == R.id.btn_emoji) {
       if (isEmojiVisible) {
         setEmojiExpanded(true);
+        showEmojiTooltip();
       }
     } else if (viewId == R.id.btn_mute) {
       if (!TD.isFinished(call)) {
@@ -1232,7 +1247,9 @@ public class CallController extends ViewController<CallController.Arguments> imp
           callSettings = new CallSettings(tdlib, call.id);
         }
         callSettings.setCameraFrontFacing(!callSettings.isCameraFrontFacing());
-        currentUserTextureView.showWaitFrame();
+        if (preCallCameraPreview != null && preCallCameraPreview.getView().getVisibility() == View.VISIBLE) {
+          startPreCallCameraPreview(callSettings.isCameraFrontFacing());
+        }
         currentUserTextureView.renderer.setMirror(callSettings.isCameraFrontFacing());
       }
     } else if (viewId == R.id.btn_screenCapture) {
@@ -1270,6 +1287,28 @@ public class CallController extends ViewController<CallController.Arguments> imp
       currentUserTextureView.stopCapturing();
     }
     showFloatingLayout(true);
+  }
+
+  private boolean isCallReady () {
+    return call != null && call.state.getConstructor() == TdApi.CallStateReady.CONSTRUCTOR;
+  }
+
+  private void startPreCallCameraPreview (boolean frontFacing) {
+    if (preCallCameraPreview == null || isDestroyed() || isCallReady() || call == null || TD.isFinished(call)) {
+      return;
+    }
+    if (preCallCameraPreview.getView().getVisibility() != View.VISIBLE) {
+      preCallCameraPreview.getView().setVisibility(View.VISIBLE);
+    }
+    preCallCameraPreview.start(frontFacing);
+  }
+
+  private void stopPreCallCameraPreview () {
+    if (preCallCameraPreview == null || preCallCameraPreview.getView().getVisibility() != View.VISIBLE) {
+      return;
+    }
+    preCallCameraPreview.stop();
+    preCallCameraPreview.getView().setVisibility(View.GONE);
   }
 
   @Override
@@ -1428,13 +1467,14 @@ public class CallController extends ViewController<CallController.Arguments> imp
         return;
       }
       if (remoteSource.device == StreamDevice.CAMERA || remoteSource.device == StreamDevice.SCREEN) {
-        var currentUserActive = callSettings.getLocalCameraState() != VoIPFloatingLayout.STATE_GONE;
         if (remoteSource.state == StreamStatus.ACTIVE) {
           callSettings.setRemoteCameraState(VoIPFloatingLayout.STATE_FULLSCREEN);
           callingUserTextureView.setVisibility(View.VISIBLE);
           callingUserTextureView.initRenderer(JavaVideoCapturerModule.getSharedEGLContext());
           initMiniRenderer();
-          if (currentUserActive) callSettings.setLocalCameraState(VoIPFloatingLayout.STATE_FLOATING);
+          if (callSettings.getLocalCameraState() != VoIPFloatingLayout.STATE_GONE) {
+            callSettings.setLocalCameraState(VoIPFloatingLayout.STATE_FLOATING);
+          }
         } else if (remoteSource.state == StreamStatus.IDLING) {
           callSettings.setRemoteCameraState(VoIPFloatingLayout.STATE_GONE);
           callingUserTextureView.setVisibility(View.GONE);
@@ -1443,9 +1483,11 @@ public class CallController extends ViewController<CallController.Arguments> imp
             callingUserMiniTextureRenderer.release();
             callingUserMiniRendererInitialized = false;
           }
-          if (currentUserActive) callSettings.setLocalCameraState(VoIPFloatingLayout.STATE_FULLSCREEN);
+          if (callSettings.getLocalCameraState() != VoIPFloatingLayout.STATE_GONE) {
+            callSettings.setLocalCameraState(VoIPFloatingLayout.STATE_FULLSCREEN);
+          }
         }
-        if (currentUserActive) showFloatingLayout(true);
+        showFloatingLayout(true);
         showMiniFloatingLayout(true);
       }
     }));
@@ -1486,6 +1528,8 @@ public class CallController extends ViewController<CallController.Arguments> imp
             case CAPTURE:
               if (callSettings.getLocalCameraState() != VoIPFloatingLayout.STATE_GONE) {
                 currentUserTextureView.onFrame(frame);
+                // Hide the local CameraX preview only once the call engine delivers its own frames.
+                stopPreCallCameraPreview();
               }
               break;
             case PLAYBACK:
@@ -1600,6 +1644,11 @@ public class CallController extends ViewController<CallController.Arguments> imp
       updateCallButtons();
       updateUiAutoHide();
       updateKeepScreenOn();
+      if (!isCallReady() && settings.isCameraSharing()) {
+        startPreCallCameraPreview(settings.isCameraFrontFacing());
+      } else if (isCallReady() || !settings.isCameraSharing()) {
+        stopPreCallCameraPreview();
+      }
     }
   }
 
@@ -1643,6 +1692,14 @@ public class CallController extends ViewController<CallController.Arguments> imp
 
   private void updateCallState () {
     updateLoop();
+    if (isCallReady()) {
+      TGCallService service = TGCallService.currentInstance();
+      if (service != null) {
+        setupVideoFrameListeners(service);
+      }
+    } else if (TD.isFinished(call)) {
+      stopPreCallCameraPreview();
+    }
     String str;
     callDuration = tdlib.context().calls().getCallDuration(tdlib, call.id);
     if (previousCallState != null && call.state.getConstructor() == TdApi.CallStateHangingUp.CONSTRUCTOR) {
@@ -1817,7 +1874,9 @@ public class CallController extends ViewController<CallController.Arguments> imp
       emojiViewSmall.setText(result);
       emojiViewBig.setText(result);
 
-      if (!hadEmojiSinceStart) {
+      if (!hadEmojiSinceStart && !emojiTooltipShown && !Settings.instance().wasCallEmojiHintShown()) {
+        emojiTooltipShown = true;
+        Settings.instance().setCallEmojiHintShown(true);
         showEmojiTooltip();
       }
     }
@@ -1826,7 +1885,17 @@ public class CallController extends ViewController<CallController.Arguments> imp
   }
 
   private void showEmojiTooltip () {
-    context().tooltipManager().builder(emojiViewSmall).controller(this).show(tdlib, Lang.getStringBold(R.string.CallEmojiHint, TD.getUserSingleName(call.userId, user)));
+    if (context().tooltipManager() == null || emojiViewSmall == null) {
+      return;
+    }
+    if (emojiTooltip != null) {
+      emojiTooltip.hideNow();
+    }
+    emojiTooltip = context().tooltipManager()
+      .builder(emojiViewSmall)
+      .controller(this)
+      .show(tdlib, Lang.getStringBold(R.string.CallEmojiHint, TD.getUserSingleName(call.userId, user)))
+      .hideDelayed(3500, TimeUnit.MILLISECONDS);
   }
 
   private boolean isEmojiVisible;
@@ -1986,6 +2055,11 @@ public class CallController extends ViewController<CallController.Arguments> imp
   public void destroy () {
     UI.cancel(hideUiRunnable);
     setKeepScreenOn(false);
+    stopPreCallCameraPreview();
+    if (emojiTooltip != null) {
+      emojiTooltip.hideNow();
+      emojiTooltip = null;
+    }
     TGCallService service = TGCallService.currentInstance();
     if (service != null) {
       service.clearVideoCallbacks();

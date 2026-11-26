@@ -1843,6 +1843,7 @@
   <string name="VoipBusy">Line Busy</string>
   <string name="VoipDisconnect">Disconnected</string>
   <string name="VoipBranding">Telegram Call</string>
+  <string name="VideoCall">Video call</string>
   <string name="CallBrandingIncoming">Incoming Telegram Call</string>
   <string name="OnMobileNetwork">On Mobile Network</string>
   <string name="OnRoaming">While Roaming</string>

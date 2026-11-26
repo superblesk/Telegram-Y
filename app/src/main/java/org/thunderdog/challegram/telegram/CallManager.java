@@ -608,7 +608,11 @@ debugCall id:long debug:string = Ok;
   }
 
   public void makeCallDelayed (final ViewController<?> context, final long userId, @Nullable final TdApi.UserFullInfo userFull, final boolean needPrompt) {
-    UI.post(() -> makeCall(context, userId, userFull, needPrompt), 180l);
+    makeCallDelayed(context, userId, userFull, needPrompt, false);
+  }
+
+  private void makeCallDelayed (final ViewController<?> context, final long userId, @Nullable final TdApi.UserFullInfo userFull, final boolean needPrompt, final boolean isVideo) {
+    UI.post(() -> makeCall(context, userId, userFull, needPrompt, isVideo), 180l);
   }
 
   public boolean hasActiveCall () {
@@ -631,16 +635,24 @@ debugCall id:long debug:string = Ok;
   }
 
   public void makeCall (final ViewController<?> context,final long userId, @Nullable TdApi.UserFullInfo userFull) {
-    makeCall(context, userId, userFull, Settings.instance().needOutboundCallsPrompt());
+    makeCall(context, userId, userFull, Settings.instance().needOutboundCallsPrompt(), false);
+  }
+
+  public void makeVideoCall (final ViewController<?> context, final long userId, @Nullable TdApi.UserFullInfo userFull) {
+    makeCall(context, userId, userFull, Settings.instance().needOutboundCallsPrompt(), true);
   }
 
   public void makeCall (final ViewController<?> context, final long userId, @Nullable TdApi.UserFullInfo userFull, final boolean needPrompt) {
+    makeCall(context, userId, userFull, needPrompt, false);
+  }
+
+  private void makeCall (final ViewController<?> context, final long userId, @Nullable TdApi.UserFullInfo userFull, final boolean needPrompt, final boolean isVideo) {
     if (userId == 0) {
       return;
     }
     if (Looper.myLooper() != Looper.getMainLooper()) {
       final TdApi.UserFullInfo userFullFinal = userFull;
-      UI.post(() -> makeCall(context, userId, userFullFinal, needPrompt));
+      UI.post(() -> makeCall(context, userId, userFullFinal, needPrompt, isVideo));
       return;
     }
     if (userFull == null) {
@@ -678,7 +690,7 @@ debugCall id:long debug:string = Ok;
           hangUp(pendingCallTdlib, pendingCall.id, () -> {
             if (!signal[0]) {
               signal[0] = true;
-              makeCall(context, userId, userFullFinal, false);
+              makeCall(context, userId, userFullFinal, false, isVideo);
             }
           });
           UI.post(() -> {
@@ -722,7 +734,7 @@ debugCall id:long debug:string = Ok;
         if (error != null) {
           UI.showError(error);
         } else {
-          makeCall(context, userId, remoteUserFull, needPrompt);
+          makeCall(context, userId, remoteUserFull, needPrompt, isVideo);
         }
       });
       return;
@@ -731,7 +743,7 @@ debugCall id:long debug:string = Ok;
       final TdApi.UserFullInfo userFullFinal = userFull;
       context.showOptions(Lang.getStringBold(R.string.CallX, context.tdlib().cache().userName(userId)), new int[]{R.id.btn_phone_call, R.id.btn_cancel}, new String[]{Lang.getString(R.string.Call), Lang.getString(R.string.Cancel)}, null, new int[]{R.drawable.baseline_call_24, R.drawable.baseline_cancel_24}, (itemView, id) -> {
         if (id == R.id.btn_phone_call) {
-          makeCallDelayed(context, userId, userFullFinal, false);
+          makeCallDelayed(context, userId, userFullFinal, false, isVideo);
         }
         return true;
       });
@@ -741,19 +753,71 @@ debugCall id:long debug:string = Ok;
     final TdApi.UserFullInfo grantedUserFull = userFull;
     Runnable onGranted = () -> {
       if (!Passcode.instance().isLocked()) {
-        makeCall(context, userId, grantedUserFull, false);
+        makeCall(context, userId, grantedUserFull, false, isVideo);
       }
     };
     if (!checkRecordPermissions(context.context(), context.tdlib(), null, onGranted)) {
       return;
     }
+    if (isVideo && !checkCameraPermissions(context, onGranted)) {
+      return;
+    }
     context.context().closeAllMedia(false);
-    context.tdlib().send(new TdApi.CreateCall(userId, VoIP.getProtocol(), false), (callId, error) -> {
+    if (isVideo) {
+      showCameraOptionsAndCall(context, userId);
+    } else {
+      createCall(context, userId, false, false);
+    }
+  }
+
+  private boolean checkCameraPermissions (final ViewController<?> context, final Runnable onGranted) {
+    BaseActivity activity = context.context();
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || ContextCompat.checkSelfPermission(activity, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+      return true;
+    }
+    activity.requestCameraPermissionForCall((code, permissions, grantResults, grantCount) -> {
+      if (grantCount > 0) {
+        onGranted.run();
+      } else if (!context.isDestroyed()) {
+        UI.showToast(R.string.cam_hint, Toast.LENGTH_SHORT);
+      }
+    });
+    return false;
+  }
+
+  private void showCameraOptionsAndCall (final ViewController<?> context, final long userId) {
+    if (Settings.instance().ntgCallsAskCamera()) {
+      context.showOptions(Lang.getString(R.string.VoipSelectCamera),
+        new int[] {R.id.btn_camera_front, R.id.btn_camera_rear},
+        new String[] {Lang.getString(R.string.VoipFrontCamera), Lang.getString(R.string.VoipBackCamera)},
+        null,
+        new int[] {R.drawable.baseline_camera_front_24, R.drawable.baseline_camera_rear_24},
+        (itemView, id) -> {
+          if (!context.isDestroyed()) {
+            createCall(context, userId, true, id == R.id.btn_camera_front);
+          }
+          return true;
+        });
+    } else {
+      createCall(context, userId, true, Settings.instance().ntgCallsDefaultCameraFront());
+    }
+  }
+
+  private void createCall (final ViewController<?> context, final long userId, final boolean isVideo, final boolean cameraFrontFacing) {
+    context.tdlib().send(new TdApi.CreateCall(userId, VoIP.getProtocol(), isVideo), (callId, error) -> {
       if (error != null) {
         Log.e(Log.TAG_VOIP, "Failed to create call: %s", TD.toErrorString(error));
         UI.showError(error);
       } else {
         Log.v(Log.TAG_VOIP, "#%d: call created, user_id:%d", callId.id, userId);
+        if (isVideo) {
+          // Enable the camera from the very first frame: the service and the call screen
+          // both initialize their video state from cached call settings.
+          CallSettings settings = new CallSettings(context.tdlib(), callId.id);
+          settings.setCameraFrontFacing(cameraFrontFacing);
+          settings.setCameraSharing(true);
+          settings.setLocalCameraState(settings.getAvailableLocalCameraState());
+        }
       }
     });
   }
