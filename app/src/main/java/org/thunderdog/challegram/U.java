@@ -98,6 +98,7 @@ import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory;
 import androidx.media3.exoplayer.hls.HlsExtractorFactory;
 import androidx.media3.exoplayer.hls.HlsMediaChunkExtractor;
 import androidx.media3.exoplayer.hls.HlsMediaSource;
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.source.MediaSource;
 import androidx.media3.exoplayer.source.ProgressiveMediaSource;
@@ -740,6 +741,14 @@ public class U {
   }
 
   public static ExoPlayer newExoPlayer (Context context, boolean preferExtensions) {
+    return newExoPlayer(context, preferExtensions, MediaCodecSelector.DEFAULT);
+  }
+
+  public static ExoPlayer newExoPlayer (
+    Context context,
+    boolean preferExtensions,
+    MediaCodecSelector decoderSelector
+  ) {
     // new AdaptiveVideoTrackSelection.Factory(new DefaultBandwidthMeter())
     // DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
     // DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON
@@ -748,7 +757,8 @@ public class U {
       DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON;
     final RenderersFactory renderersFactory = new DefaultRenderersFactory(context)
       .setExtensionRendererMode(extensionMode)
-      .setEnableDecoderFallback(true);
+      .setEnableDecoderFallback(true)
+      .setMediaCodecSelector(decoderSelector);
     final MediaSource.Factory mediaSourceFactory = new DefaultMediaSourceFactory(context, new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true));
     final AnalyticsCollector analyticsCollector;
     if (Log.getLogLevel() > Log.LEVEL_ASSERT) {
@@ -2469,10 +2479,25 @@ public class U {
     return rotation;
   }
 
+  @Nullable
+  public static String formatHardening (int hardening) {
+    if (hardening == N.HARDENING_NOT_BUILT) {
+      return null;
+    }
+    boolean hasPac = BitwiseUtils.hasFlag(hardening, N.HARDENING_PAC);
+    boolean hasBti = BitwiseUtils.hasFlag(hardening, N.HARDENING_BTI);
+    if (hasPac && hasBti) {
+      return "PAC, BTI";
+    }
+    return hasPac ? "PAC" : hasBti ? "BTI" : "none";
+  }
+
   public static String getUsefulMetadata (@Nullable Tdlib tdlib) {
     AppBuildInfo buildInfo = org.thunderdog.challegram.unsorted.Settings.instance().getCurrentBuildInformation();
     String locale = Lang.getConfigurationLocale().toString();
     String appLocale = Lang.locale().toString();
+    // Also the report of a crash that happened before libraries were loaded
+    String hardening = N.isLoaded() ? formatHardening(N.getHardwareHardening()) : null;
     String metadata = Lang.getAppBuildAndVersion(tdlib) + " (" + BuildConfig.COMMIT + ")\n" +
       (!buildInfo.getPullRequests().isEmpty() ? "PRs: " + buildInfo.pullRequestsList() + "\n" : "") +
       (!"none".equals(BuildConfig.TGX_EXTENSION) ? "Extension: " + BuildConfig.TGX_EXTENSION + "\n" : "") +
@@ -2484,6 +2509,7 @@ public class U {
       "WebRTC: TGX-Android/webrtc@" + BuildConfig.WEBRTC_COMMIT + "\n" +
       "Android: " + SdkVersion.getPrettyName() + " (" + Build.VERSION.SDK_INT + ")" + "\n" +
       "Device: " + Build.MANUFACTURER + " " + Build.BRAND + " " + Build.MODEL + " (" + Build.DISPLAY + ")\n" +
+      (hardening != null ? "Hardware-assisted hardening: " + hardening + "\n" : "") +
       "Screen: " + Screen.widestSide() + "x" + Screen.smallestSide() + " (density: " + Screen.density() + ", fps: " + Screen.refreshRate() + ")" + "\n" +
       "Build: `" + Build.FINGERPRINT + "`\n" +
       "Package: " + AppContext.get().getPackageName() + "\n" +
