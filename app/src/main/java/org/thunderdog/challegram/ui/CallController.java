@@ -119,6 +119,7 @@ import tgx.td.ChatId;
 public class CallController extends ViewController<CallController.Arguments> implements TdlibCache.UserDataChangeListener, TdlibCache.CallStateChangeListener, View.OnClickListener, FactorAnimator.Target, Runnable, CallControlsLayout.CallControlCallback, ActivityResultHandler, Screen.StatusBarHeightChangeListener {
   private static final boolean DEBUG_FADE_BRANDING = true;
   private static final int SCREEN_CAPTURE_REQUEST_CODE = 1001;
+  private static final long CAMERA_SWITCH_THROTTLE_MS = 1000L;
 
   private static class ButtonView extends View implements FactorAnimator.Target {
     private Drawable icon;
@@ -322,6 +323,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
   private LinearLayout videoButtonContainer, flipCameraButtonContainer, messageButtonContainer, otherOptionsContainer, speakerButtonContainer;
 
   private float lastHeaderFactor;
+  private long lastCameraSwitchAt;
 
   public void showWithoutTransition () {
     applyCustomHeaderAnimations(1f);
@@ -1173,6 +1175,11 @@ public class CallController extends ViewController<CallController.Arguments> imp
       }
     } else if (viewId == R.id.btn_flip_camera) {
       if (!TD.isFinished(call)) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastCameraSwitchAt < CAMERA_SWITCH_THROTTLE_MS) {
+          return;
+        }
+        lastCameraSwitchAt = now;
         if (callSettings == null) {
           callSettings = new CallSettings(tdlib, call.id);
         }

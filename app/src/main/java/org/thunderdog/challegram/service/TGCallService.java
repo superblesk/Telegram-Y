@@ -49,6 +49,8 @@ import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
 import android.view.KeyEvent;
 
+import org.json.JSONObject;
+
 import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -578,7 +580,15 @@ public class TGCallService extends Service implements
       updateStats();
       if (!sentDebugLog && ((TdApi.CallStateDiscarded) call.state).needDebugInformation && !StringUtils.isEmpty(lastDebugLog)) {
         sentDebugLog = true;
-        tdlib.send(new TdApi.SendCallDebugInformation(new TdApi.InputCallDiscarded(call.id), lastDebugLog.toString()), tdlib.typedOkHandler());
+        // Telegram expects this field to be a JSON document. NTgCalls returns
+        // a plain-text debug string, so wrap it before sending it to TDLib.
+        String debugInformation;
+        try {
+          debugInformation = new JSONObject().put("log", lastDebugLog.toString()).toString();
+        } catch (Throwable ignored) {
+          debugInformation = "{}";
+        }
+        tdlib.send(new TdApi.SendCallDebugInformation(new TdApi.InputCallDiscarded(call.id), debugInformation), tdlib.typedOkHandler());
       }
       boolean needRating = ((TdApi.CallStateDiscarded) call.state).needRating;
       if (!sentRating && TD.canRateCall(call) && needRating) {
