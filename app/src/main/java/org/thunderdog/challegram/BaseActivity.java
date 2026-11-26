@@ -3831,6 +3831,7 @@ public abstract class BaseActivity extends FragmentActivity implements View.OnTo
   public static final int SCREEN_FLAG_RECORDING = 1 << 2;
   public static final int SCREEN_FLAG_CAMERA_OPEN = 1 << 3;
   public static final int SCREEN_FLAG_PLAYING_FULLSCREEN_WEB_VIDEO = 1 << 4;
+  public static final int SCREEN_FLAG_VIDEO_CALL = 1 << 5;
 
   private int screenFlags;
 

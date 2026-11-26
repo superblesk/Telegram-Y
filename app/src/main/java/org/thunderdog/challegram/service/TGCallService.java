@@ -64,6 +64,7 @@ import io.github.pytgcalls.RemoteSourceChangeCallback;
 import org.pytgcalls.ntgcallsx.CallInterface;
 import org.pytgcalls.ntgcallsx.NTgCallsInterface;
 import org.pytgcalls.ntgcallsx.TgCallsInterface;
+import org.pytgcalls.ntgcallsx.VoIPFloatingLayout;
 import org.thunderdog.challegram.BuildConfig;
 import org.thunderdog.challegram.BaseActivity;
 import org.thunderdog.challegram.Log;
@@ -769,6 +770,9 @@ public class TGCallService extends Service implements
   @Override
   public void onCallSettingsChanged (int callId, CallSettings settings) {
     this.postponedCallSettings = settings;
+    if (isVideoStreamActive() && proximityWakelock != null && proximityWakelock.isHeld()) {
+      proximityWakelock.release();
+    }
     if (tgcalls != null && settings != null) {
       tgcalls.setMicDisabled(settings.isMicMuted());
       if (settings.isCameraSharing() != lastCameraStatus || settings.isCameraFrontFacing() != lastCameraFrontFacing) {
@@ -953,6 +957,10 @@ public class TGCallService extends Service implements
   @SuppressWarnings("NewApi")
   public void onSensorChanged (SensorEvent event) {
     if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) {
+      // When video is actually flowing, never let the proximity sensor turn the screen off.
+      if (isVideoStreamActive()) {
+        return;
+      }
       AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
       if (isHeadsetPlugged || am.isSpeakerphoneOn() || (isBtHeadsetConnected && am.isBluetoothScoOn())) {
         return;
@@ -2045,6 +2053,16 @@ public class TGCallService extends Service implements
 
   public boolean isVideoSupported () {
     return tgcalls != null && tgcalls.isVideoSupported();
+  }
+
+  private boolean isVideoStreamActive () {
+    if (call == null || tdlib == null) {
+      return false;
+    }
+    CallSettings settings = tdlib.cache().getCallSettings(call.id);
+    return settings != null &&
+      (settings.getLocalCameraState() != VoIPFloatingLayout.STATE_GONE ||
+        settings.getRemoteCameraState() != VoIPFloatingLayout.STATE_GONE);
   }
 
   private boolean logViewed;

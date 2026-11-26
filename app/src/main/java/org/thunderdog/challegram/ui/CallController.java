@@ -120,6 +120,9 @@ public class CallController extends ViewController<CallController.Arguments> imp
   private static final boolean DEBUG_FADE_BRANDING = true;
   private static final int SCREEN_CAPTURE_REQUEST_CODE = 1001;
   private static final long CAMERA_SWITCH_THROTTLE_MS = 1000L;
+  private static final long CALL_UI_HIDE_DELAY = 5000L;
+  private static final long DURATION_UI_FADE = 250L;
+  private static final int ANIMATOR_UI_VISIBILITY = 7;
 
   private static class ButtonView extends View implements FactorAnimator.Target {
     private Drawable icon;
@@ -325,6 +328,23 @@ public class CallController extends ViewController<CallController.Arguments> imp
   private float lastHeaderFactor;
   private long lastCameraSwitchAt;
 
+  private float uiVisibilityFactor = 1f;
+  private boolean uiHidden;
+  private FactorAnimator uiVisibilityAnimator;
+  private boolean videoUiActive;
+  private boolean callUiVisible;
+  private boolean consumeRevealTouch;
+  private float stateFlashFactor = 1f;
+  private float strengthFactor = 1f;
+
+  private final Runnable hideUiRunnable = () -> {
+    if (!isDestroyed() && isVideoUiActive()) {
+      setUiHidden(true, true);
+    }
+  };
+
+  private boolean keepScreenOnEnabled;
+
   public void showWithoutTransition () {
     applyCustomHeaderAnimations(1f);
   }
@@ -333,11 +353,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
   protected void applyCustomHeaderAnimations (float factor) {
     if (lastHeaderFactor != factor) {
       lastHeaderFactor = factor;
-      updateControlsAlpha();
-      updateEmojiFactors();
-      if (DEBUG_FADE_BRANDING) {
-        brandWrap.setAlpha(factor);
-      }
+      updateUiAlpha();
       avatarView.invalidate();
     }
   }
@@ -392,6 +408,26 @@ public class CallController extends ViewController<CallController.Arguments> imp
   protected View onCreateView (final Context context) {
     final FrameLayoutFix contentView = new FrameLayoutFix(context) {
       @Override
+      public boolean dispatchTouchEvent (MotionEvent event) {
+        int action = event.getAction();
+        if (action == MotionEvent.ACTION_DOWN) {
+          // The first tap only brings the faded controls back, without pressing any button.
+          if (uiVisibilityFactor < .99f) {
+            consumeRevealTouch = true;
+            resetUiAutoHide();
+            return true;
+          }
+          resetUiAutoHide();
+        } else if (consumeRevealTouch) {
+          if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            consumeRevealTouch = false;
+          }
+          return true;
+        }
+        return super.dispatchTouchEvent(event);
+      }
+
+      @Override
       protected void onMeasure (int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
         updateEmojiPosition();
@@ -436,7 +472,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
       @Override
       protected void onDraw(Canvas c){
         super.onDraw(c);
-        int alpha = (int) (255f * lastHeaderFactor * .5f);
+        int alpha = (int) (255f * lastHeaderFactor * uiVisibilityFactor * .5f);
         Drawables.setAlpha(topShadow, alpha);
         topShadow.draw(c);
       }
@@ -665,6 +701,7 @@ public class CallController extends ViewController<CallController.Arguments> imp
     strengthView = new CallStrengthView(context);
     strengthView.setLayoutParams(lp);
     if (callStrength < 0) {
+      strengthFactor = 0f;
       strengthView.setAlpha(0f);
     }
     strengthView.setBarsCount(callStrength);
@@ -918,6 +955,9 @@ public class CallController extends ViewController<CallController.Arguments> imp
   @Override
   public void onPrepareToShow () {
     super.onPrepareToShow();
+    callUiVisible = true;
+    updateKeepScreenOn();
+    resetUiAutoHide();
     if (!UI.isTablet()) {
       context().setOrientation(BaseActivity.getAndroidOrientationPortrait());
     }
@@ -936,6 +976,10 @@ public class CallController extends ViewController<CallController.Arguments> imp
   @Override
   public void onCleanAfterHide () {
     super.onCleanAfterHide();
+    callUiVisible = false;
+    UI.cancel(hideUiRunnable);
+    setUiHidden(false, false);
+    setKeepScreenOn(false);
     if (!UI.isTablet()) {
       context().setOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
@@ -1003,7 +1047,8 @@ public class CallController extends ViewController<CallController.Arguments> imp
         break;
       }
       case ANIMATOR_FLASH_ID: {
-        stateView.setAlpha(factor <= .5f ? 1f - (factor / .5f) : (factor - .5f) / .5f);
+        stateFlashFactor = factor <= .5f ? 1f - (factor / .5f) : (factor - .5f) / .5f;
+        updateUiAlpha();
         break;
       }
       case ANIMATOR_EMOJI_VISIBILITY_ID: {
@@ -1015,9 +1060,12 @@ public class CallController extends ViewController<CallController.Arguments> imp
         break;
       }
       case ANIMATOR_STRENGTH: {
-        if (strengthView != null) {
-          strengthView.setAlpha(factor);
-        }
+        strengthFactor = factor;
+        updateUiAlpha();
+        break;
+      }
+      case ANIMATOR_UI_VISIBILITY: {
+        setUiFactor(factor);
         break;
       }
     }
@@ -1550,6 +1598,8 @@ public class CallController extends ViewController<CallController.Arguments> imp
     if (!isDestroyed()) {
       callSettings = settings;
       updateCallButtons();
+      updateUiAutoHide();
+      updateKeepScreenOn();
     }
   }
 
@@ -1617,6 +1667,8 @@ public class CallController extends ViewController<CallController.Arguments> imp
     updateEmoji();
     updateFlashing();
     updateCallStrength();
+    updateUiAutoHide();
+    updateKeepScreenOn();
   }
 
   private boolean hadFocus;
@@ -1632,9 +1684,109 @@ public class CallController extends ViewController<CallController.Arguments> imp
   }
 
   private void updateControlsAlpha () {
-    float alpha = lastHeaderFactor * buttonsFactor;
+    float alpha = lastHeaderFactor * buttonsFactor * uiVisibilityFactor;
     buttonWrap.setAlpha(alpha);
     buttonWrap.setTranslationY((1f - lastHeaderFactor) * buttonWrap.getMeasuredHeight() * .2f);
+  }
+
+  private void updateUiAlpha () {
+    if (nameView != null) {
+      nameView.setAlpha(uiVisibilityFactor);
+    }
+    if (stateView != null) {
+      stateView.setAlpha(uiVisibilityFactor * stateFlashFactor);
+    }
+    if (brandWrap != null) {
+      brandWrap.setAlpha(lastHeaderFactor * uiVisibilityFactor);
+    }
+    if (strengthView != null) {
+      strengthView.setAlpha(strengthFactor * uiVisibilityFactor);
+    }
+    if (callControlsLayout != null) {
+      callControlsLayout.setAlpha(uiVisibilityFactor);
+    }
+    if (buttonWrap != null) {
+      updateControlsAlpha();
+    }
+    if (emojiViewSmall != null) {
+      updateEmojiFactors();
+    }
+  }
+
+  private void setUiFactor (float factor) {
+    if (this.uiVisibilityFactor != factor) {
+      this.uiVisibilityFactor = factor;
+      updateUiAlpha();
+      if (avatarView != null) {
+        avatarView.invalidate();
+      }
+    }
+  }
+
+  private void setUiHidden (boolean hidden, boolean animated) {
+    if (this.uiHidden == hidden) {
+      return;
+    }
+    this.uiHidden = hidden;
+    float target = hidden ? 0f : 1f;
+    if (animated) {
+      if (uiVisibilityAnimator == null) {
+        uiVisibilityAnimator = new FactorAnimator(ANIMATOR_UI_VISIBILITY, this, AnimatorUtils.DECELERATE_INTERPOLATOR, DURATION_UI_FADE, uiVisibilityFactor);
+      }
+      uiVisibilityAnimator.animateTo(target);
+    } else {
+      if (uiVisibilityAnimator != null) {
+        uiVisibilityAnimator.forceFactor(target);
+      }
+      setUiFactor(target);
+    }
+  }
+
+  private boolean isVideoStreamActive () {
+    // Outgoing calls are created with isVideo=false, so the real criterion is whether video is
+    // actually flowing: either our camera/screen share or the remote participant's video.
+    return !isDestroyed() && callUiVisible && call != null && !TD.isFinished(call) && callSettings != null &&
+      (callSettings.getLocalCameraState() != VoIPFloatingLayout.STATE_GONE ||
+        callSettings.getRemoteCameraState() != VoIPFloatingLayout.STATE_GONE);
+  }
+
+  private boolean isVideoUiActive () {
+    return isVideoStreamActive() && call.state.getConstructor() == TdApi.CallStateReady.CONSTRUCTOR;
+  }
+
+  private void updateUiAutoHide () {
+    boolean active = isVideoUiActive();
+    if (this.videoUiActive != active) {
+      this.videoUiActive = active;
+      UI.cancel(hideUiRunnable);
+      if (active) {
+        setUiHidden(false, false);
+        UI.post(hideUiRunnable, CALL_UI_HIDE_DELAY);
+      } else {
+        setUiHidden(false, true);
+      }
+    }
+  }
+
+  private void resetUiAutoHide () {
+    UI.cancel(hideUiRunnable);
+    if (uiHidden) {
+      setUiHidden(false, true);
+    }
+    if (isVideoUiActive()) {
+      UI.post(hideUiRunnable, CALL_UI_HIDE_DELAY);
+    }
+  }
+
+  private void setKeepScreenOn (boolean enabled) {
+    if (this.keepScreenOnEnabled != enabled) {
+      this.keepScreenOnEnabled = enabled;
+      context().setScreenFlagEnabled(BaseActivity.SCREEN_FLAG_VIDEO_CALL, enabled);
+    }
+  }
+
+  private void updateKeepScreenOn () {
+    setKeepScreenOn(isVideoStreamActive());
   }
 
   private void updateCallButtons () {
@@ -1738,11 +1890,11 @@ public class CallController extends ViewController<CallController.Arguments> imp
   private static float EMOJI_EXPAND_FACTOR = DESIRED_EMOJI_EXPAND_FACTOR;
 
   private void updateEmojiFactors () {
-    emojiViewSmall.setAlpha(MathUtils.clamp(emojiVisibilityFactor * (1f - Math.max(1f - lastHeaderFactor, emojiExpandFactor >= .5f ? (emojiExpandFactor - .5f) / .5f : 0f))));
+    emojiViewSmall.setAlpha(MathUtils.clamp(uiVisibilityFactor * emojiVisibilityFactor * (1f - Math.max(1f - lastHeaderFactor, emojiExpandFactor >= .5f ? (emojiExpandFactor - .5f) / .5f : 0f))));
     emojiViewSmall.setScaleX(1f + emojiExpandFactor * (EMOJI_EXPAND_FACTOR - 1f));
     emojiViewSmall.setScaleY(1f + emojiExpandFactor * (EMOJI_EXPAND_FACTOR - 1f));
 
-    float bigAlpha = MathUtils.clamp(emojiVisibilityFactor * emojiExpandFactor);
+    float bigAlpha = MathUtils.clamp(uiVisibilityFactor * emojiVisibilityFactor * emojiExpandFactor);
     emojiViewBig.setAlpha(bigAlpha);
     emojiViewHint.setAlpha(bigAlpha);
     float factor = 1f / EMOJI_EXPAND_FACTOR;
@@ -1832,6 +1984,8 @@ public class CallController extends ViewController<CallController.Arguments> imp
 
   @Override
   public void destroy () {
+    UI.cancel(hideUiRunnable);
+    setKeepScreenOn(false);
     TGCallService service = TGCallService.currentInstance();
     if (service != null) {
       service.clearVideoCallbacks();
